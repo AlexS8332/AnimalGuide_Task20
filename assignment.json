@@ -1,0 +1,14 @@
+{
+  "num": "20",
+  "slug": "animal-guide-multi-mcp",
+  "title": "AnimalGuide: несколько MCP-серверов, маршрутизация и длинный флоу агента (DeepSeek, Go + браузер)",
+  "stack": "go",
+  "status": "planned",
+  "created": "2026-09-25",
+  "updated": "2026-09-25",
+  "repo": "",
+  "env": [
+    "DEEPSEEK_API_KEY"
+  ],
+  "tags": []
+}
