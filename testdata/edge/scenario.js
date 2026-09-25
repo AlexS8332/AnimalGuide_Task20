@@ -744,6 +744,209 @@
     await until('итог', () => q('#pipe-result'), 8000);
   };
 
+  // ===== Окно «MCP-серверы» (v20) =====
+
+  /* Подставной REST (edgeHub в edge_test.go): настоящий hubapi с подставным
+     реестром из трёх серверов (до «Подключить все» — idle) и прогоном,
+     который двигается по опросам окна: каждый GET прогона завершает идущий
+     вызов и начинает следующий. Флоу — 13 вызовов, facts_get отвечает
+     ошибкой, в итоге одна проверка ⚠. В аргументах, ответе, превью и
+     причине скрытого маршрута — разметка: она не должна стать элементами. */
+  const hubPosts = path => factsCalls.filter(c => c.method === 'POST' && c.url.endsWith('/api/hub/' + path));
+  const rgb = el => getComputedStyle(el).color;
+  async function openHub() {
+    await until('кнопка на пульте', () => q('#hub-button'), 8000);
+    click('#hub-button');
+    await until('окно серверов', () => windowOpen() && q('#hub-root') && $('window-title').textContent === 'MCP-серверы' && q('#hub-servers-root .hub-bar'), 8000);
+  }
+  async function hubConnect() {
+    click('#hub-connect');
+    await until('подключены', () => qa('.hub-server[data-status="ok"]').length === 3 && q('#hub-routes'), 8000);
+  }
+  async function hubStartFlow() {
+    click('[data-hub-tab="flow"]');
+    await until('форма флоу', () => q('#hub-form') && q('#hub-preset option') && q('#hub-runs table, #hub-runs p'));
+    click('#hub-run');
+  }
+
+  scenarios.hub = async () => {
+    spyFetch();
+    await booted();
+    window.__xss = undefined;
+
+    await check('серверы: окно в списке окон, кнопка на пульте', async () => {
+      click('#windows-button');
+      await until('список окон', () => windowOpen() && q('#window-body .wlist'));
+      assert(q('#window-body .wlist [data-arg="hub"]') && text('#window-body .wlist [data-arg="hub"]') === 'MCP-серверы', 'нет окна hub в списке');
+      click('#window [data-action="closeWindow"]');
+      await until('закрытие', () => !windowOpen());
+      const b = await until('кнопка', () => q('#hub-button'));
+      assert(b.closest('#pult'), 'кнопка не на пульте');
+      await until('три точки серверов', () => qa('#hub-button .hub-pdot').length === 3);
+      assert(b.title.includes('sources: не подключался'), 'подсказка: ' + b.title);
+    });
+
+    await check('серверы: три сервера до подключения', async () => {
+      await openHub();
+      assert(q('[data-hub-tab="servers"]').classList.contains('active'), 'открыта не вкладка «Серверы»');
+      const rows = qa('.hub-server');
+      assert(rows.map(r => r.dataset.name).join(',') === 'sources,daemon,notes', 'серверы: ' + rows.map(r => r.dataset.name));
+      assert(rows.every(r => r.dataset.status === 'idle' && r.textContent.includes('не подключался')), 'не все idle');
+      assert(text('.hub-server[data-name="daemon"] .hub-transport') === 'HTTP' && text('.hub-server[data-name="notes"] .hub-transport') === 'stdio', 'транспорт');
+      assert(text('.hub-server[data-name="daemon"] .hub-addr') === 'http://127.0.0.1:8766/mcp', 'адрес: ' + text('.hub-server[data-name="daemon"] .hub-addr'));
+      assert(q('#hub-routes-empty') && !q('.hub-route'), 'маршруты до подключения');
+      assert(!hubPosts('connect').length, 'окно подключилось само');
+    });
+
+    await check('серверы: «Подключить все»: статусы, initialize, PID, цвета', async () => {
+      click('#hub-connect');
+      assert($('hub-connect').disabled && text('#hub-connect').includes('подключаю'), 'нет ожидания: ' + text('#hub-connect'));
+      await until('подключены', () => qa('.hub-server[data-status="ok"]').length === 3, 8000);
+      assert(hubPosts('connect').length === 1, 'POST connect ушло ' + hubPosts('connect').length);
+      const d = text('.hub-server[data-name="daemon"]');
+      assert(d.includes('animals-daemon') && d.includes('20.0.0') && d.includes('5120') && d.includes('3 выдано') && d.includes('5 скрыто'), 'строка демона: ' + d);
+      assert(text('.hub-server[data-name="sources"] .hub-status') === 'подключён', 'статус');
+      assert(getComputedStyle(q('.hub-server[data-name="sources"] .hub-swatch')).backgroundColor === 'rgb(47, 107, 79)', 'цвет sources');
+      assert(getComputedStyle(q('.hub-server[data-name="notes"] .hub-swatch')).backgroundColor === 'rgb(165, 112, 26)', 'цвет notes');
+      assert(qa('#hub-button .hub-pdot.ok').length === 3, 'точки на пульте не обновились');
+    });
+
+    await check('маршруты: инструмент → сервер, скрытые приглушены с причиной', () => {
+      const rows = qa('.hub-route');
+      assert(rows.length === 18 && qa('.hub-route.hidden').length === 6, `маршрутов ${rows.length}, скрытых ${qa('.hub-route.hidden').length}`);
+      const mdd = q('.hub-route[data-tool="mdd_get"]');
+      assert(mdd.dataset.server === 'daemon' && !mdd.classList.contains('hidden') && mdd.textContent.includes('выдан'), 'mdd_get');
+      assert(rgb(mdd.querySelector('.hub-tag')) === 'rgb(44, 90, 133)', 'цвет метки: ' + rgb(mdd.querySelector('.hub-tag')));
+      const dup = q('.hub-route.hidden[data-tool="search_wikipedia"]');
+      assert(dup && dup.dataset.server === 'daemon' && dup.textContent.includes('дубль → sources'), 'дубль');
+      assert(Number(getComputedStyle(dup.querySelector('td')).opacity) < 1, 'скрытая строка не приглушена');
+      assert(q('.hub-route.hidden[data-tool="server_info"][data-server="notes"]').textContent.includes('служебный'), 'служебный');
+      assert(q('.hub-route[data-tool="run_now"]').textContent.includes('не разрешён <img src=x'), 'причина не буквами');
+      assert(text('.hub-sum').includes('модели выдано 12 инструментов, скрыто 6'), 'сводка: ' + text('.hub-sum'));
+    });
+
+    await check('флоу: вкладка, заготовка и вид по умолчанию', async () => {
+      click('[data-hub-tab="flow"]');
+      await until('форма', () => q('#hub-form') && q('[data-hub-tab="flow"]').classList.contains('active'));
+      const opts = qa('#hub-preset option');
+      assert(opts.length === 2 && $('hub-preset').value === 'passport' && opts[0].textContent === 'Паспорт вида в блокнот', 'заготовки');
+      assert($('hub-species').value === 'манул', 'вид: ' + $('hub-species').value);
+      assert(text('#hub-run') === 'Запустить флоу' && !$('hub-run').disabled, 'кнопка');
+      assert(qa('#hub-legend .hub-tag').length === 3, 'легенда серверов');
+      await until('список прогонов', () => text('#hub-runs').includes('Прогонов ещё не было'));
+    });
+
+    await check('флоу: другая заготовка, её вид', () => {
+      const sel = $('hub-preset');
+      sel.value = 'brief';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      assert($('hub-species').value === 'рысь', 'вид: ' + $('hub-species').value);
+      sel.value = 'passport';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      assert($('hub-species').value === 'манул', 'вид не вернулся');
+    });
+
+    await check('флоу: запуск: POST с заготовкой и видом', async () => {
+      click('#hub-run');
+      await until('POST', () => hubPosts('flows').length === 1);
+      const body = JSON.parse(hubPosts('flows')[0].body);
+      assert(body.preset === 'passport' && body.species === 'манул', 'тело: ' + hubPosts('flows')[0].body);
+    });
+
+    await check('флоу: вызовы по мере хода, идущий подсвечен', async () => {
+      await until('№1 идёт', () => q('.hub-call[data-n="1"][data-state="running"]'));
+      assert($('hub-run').disabled, 'кнопка не заблокирована');
+      assert(q('#hub-status .thinking'), 'нет «идёт» в строке прогона');
+      await until('№3 идёт', () => q('.hub-call[data-n="3"][data-state="running"]'));
+      assert(q('.hub-call[data-n="1"][data-state="ok"]') && q('.hub-call[data-n="2"][data-state="ok"]'), '№1–2 не готовы');
+      assert(qa('.hub-call').length === 3, 'вызовов ' + qa('.hub-call').length);
+      const row = q('.hub-call[data-n="3"]');
+      assert(row.dataset.server === 'daemon' && row.dataset.tool === 'mdd_search', '№3: ' + row.dataset.server + ' ' + row.dataset.tool);
+      assert(rgb(row.querySelector('.hub-tag')) === 'rgb(44, 90, 133)', 'цвет сервера у вызова');
+      assert(getComputedStyle(row.children[0]).borderLeftColor === 'rgb(44, 90, 133)', 'полоса сервера: ' + getComputedStyle(row.children[0]).borderLeftColor);
+      assert(getComputedStyle(row.children[1], '::after').animationName === 'pipe-run', 'нет анимации у идущего');
+      assert(text('.hub-call[data-n="1"] .hub-args') === 'query: манул', 'аргументы: ' + text('.hub-call[data-n="1"] .hub-args'));
+      $('hub-run').click(); // повторное нажатие — мимо
+    });
+
+    await check('флоу: итог: 13 вызовов трёх серверов, ошибка facts_get, «← из №k»', async () => {
+      await until('итог', () => q('#hub-result'), 20000);
+      const rows = qa('.hub-call');
+      assert(rows.length === 13, 'вызовов ' + rows.length);
+      assert([...new Set(rows.map(r => r.dataset.server))].sort().join(',') === 'daemon,notes,sources', 'серверы');
+      const fg = q('.hub-call[data-tool="facts_get"]');
+      assert(fg.dataset.state === 'fail' && fg.querySelector('.hub-mark').textContent === '✗' && fg.textContent.includes('выпуска о виде 1006010 нет'), 'facts_get');
+      assert(qa('.hub-call[data-state="ok"]').length === 12, 'готовых не 12');
+      assert(text('.hub-call[data-n="4"] .hub-from-cell') === '← из №3', '№4: ' + text('.hub-call[data-n="4"] .hub-from-cell'));
+      assert(qa('.hub-call[data-n="10"] .hub-from').length === 2, 'у №10 не две стрелки');
+      assert(hubPosts('flows').length === 1, 'POST ушёл повторно');
+      assert(text('#hub-status').includes('готово') && text('#hub-status').includes('13 вызовов'), 'строка: ' + text('#hub-status'));
+      assert(!$('hub-run').disabled, 'кнопка осталась выключенной');
+    });
+
+    await check('флоу: проверки ✓ и одна ⚠ с пояснением', () => {
+      const cs = qa('.hub-check');
+      assert(cs.length === 10, 'проверок ' + cs.length);
+      const warn = qa('.hub-check[data-level="warn"]');
+      assert(warn.length === 1 && warn[0].textContent.includes('⚠') && warn[0].textContent.includes('facts_get') && warn[0].textContent.includes('допустима'), 'предупреждение');
+      assert(qa('.hub-check[data-level="ok"]').every(c => c.querySelector('.hub-check-mark').textContent === '✓'), 'нет ✓');
+      assert(q('#hub-result.ok') && text('#hub-result').includes('Флоу прошёл проверки (предупреждений: 1)'), 'итог: ' + text('#hub-result .hub-result-head'));
+    });
+
+    await check('флоу: серверы подтвердили, ответ, файл, превью, цена', () => {
+      assert(qa('.hub-delta').length === 3, 'дельт ' + qa('.hub-delta').length);
+      assert(text('.hub-delta[data-server="notes"] .hub-dt[data-tool="nb_add"]') === 'nb_add 3 / 3 ✓', 'nb_add: ' + text('.hub-delta[data-server="notes"] .hub-dt[data-tool="nb_add"]'));
+      assert(text('#hub-file') === 'notes/otocolobus-manul.md', 'файл: ' + text('#hub-file'));
+      const pre = $('hub-preview');
+      assert(pre && pre.tagName === 'PRE' && pre.textContent.includes('# Паспорт: манул') && pre.textContent.includes('Pallas'), 'превью');
+      assert(text('#hub-cost') === '$0.0123' && text('#hub-result').includes('ходов 10'), 'цена и ходы');
+      assert(text('#hub-answer').startsWith('Паспорт манула записан в блокнот'), 'ответ');
+    });
+
+    await check('флоу: разметка из данных не исполняется', () => {
+      assert(window.__xss === undefined, 'исполнился код: __xss=' + window.__xss);
+      assert(!q('#hub-root img') && !q('#hub-root script'), 'элемент из данных в окне');
+      assert(text('#hub-answer').includes('<script>window.__xss=32</script>'), 'ответ не буквами');
+      assert(text('#hub-preview').includes('<script>window.__xss=33</script>'), 'превью не буквами');
+      assert(text('.hub-call[data-n="10"] .hub-args').includes('<img src=x'), 'аргументы не буквами');
+    });
+
+    await check('флоу: список прогонов', async () => {
+      await until('строка', () => q('#hub-runs tr.hub-run-row'));
+      const rows = qa('#hub-runs tr.hub-run-row');
+      assert(rows.length === 1 && rows[0].textContent.includes('манул') && rows[0].textContent.includes('готово') && rows[0].textContent.includes('13'),
+        'строка: ' + (rows[0] && rows[0].textContent));
+      assert(rows[0].classList.contains('current'), 'открытый прогон не отмечен');
+    });
+
+    await check('флоу: вид переживает смену вкладок; счётчики серверов выросли', async () => {
+      $('hub-species').value = 'рысь';
+      $('hub-species').dispatchEvent(new Event('input', { bubbles: true }));
+      click('[data-hub-tab="servers"]');
+      await until('серверы', () => q('.hub-server'));
+      const calls = name => q(`.hub-server[data-name="${name}"]`).lastElementChild.textContent.trim();
+      assert(calls('sources') === '5' && calls('daemon') === '3' && calls('notes') === '5', `вызовов: ${calls('sources')}/${calls('daemon')}/${calls('notes')}`);
+      click('[data-hub-tab="flow"]');
+      await until('флоу', () => q('#hub-form'));
+      assert($('hub-species').value === 'рысь', 'вид сброшен: ' + $('hub-species').value);
+      assert(q('#hub-result'), 'итог прогона пропал');
+    });
+  };
+
+  scenarios['shot-hub-servers'] = async () => {
+    await booted();
+    await openHub();
+    await hubConnect();
+  };
+  scenarios['shot-hub'] = async () => {
+    await booted();
+    await openHub();
+    await hubConnect();
+    await hubStartFlow();
+    await until('итог', () => q('#hub-result'), 20000);
+    await sleep(300);
+  };
+
   async function run() {
     const name = new URLSearchParams(location.search).get('scenario') || 'main';
     const fn = scenarios[name];

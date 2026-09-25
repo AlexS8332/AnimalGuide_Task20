@@ -36,7 +36,10 @@ import (
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/compiler"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/extract"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/features"
+	"github.com/AlexS8332/AnimalGuide_Task20/internal/flow"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/history"
+	"github.com/AlexS8332/AnimalGuide_Task20/internal/hub"
+	"github.com/AlexS8332/AnimalGuide_Task20/internal/hubapi"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/llm"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/llm/llmtest"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/memory"
@@ -121,6 +124,8 @@ type edgeApp struct {
 	facts *edgeFacts
 	// pipe — подставной REST конвейера за /api/pipeline/.
 	pipe *edgePipe
+	// hub — REST окна «MCP-серверы» за /api/hub/ (v20).
+	hub *edgeHub
 }
 
 func newEdgeApp(t *testing.T) *edgeApp {
@@ -159,7 +164,7 @@ func newEdgeApp(t *testing.T) *edgeApp {
 	for k, v := range persona.Meta() {
 		meta[k] = v
 	}
-	a := &edgeApp{m: m, facts: newEdgeFacts(), pipe: newEdgePipe()}
+	a := &edgeApp{m: m, facts: newEdgeFacts(), pipe: newEdgePipe(), hub: newEdgeHub()}
 	a.handler = server.New(m, static, meta, append(people.Extension(), compile.Extension(m)...)...)
 	a.seed(t)
 	return a
@@ -236,6 +241,7 @@ func (a *edgeApp) page(t *testing.T, shots bool) *httptest.Server {
 	})
 	mux.Handle("/api/facts/", a.facts)
 	mux.Handle("/api/pipeline/", a.pipe)
+	mux.Handle(hubapi.Prefix, a.hub)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -284,6 +290,7 @@ func TestEdge(t *testing.T) {
 		{"facts", a.main},
 		{"facts-down", a.main},
 		{"pipeline", a.main},
+		{"hub", a.main},
 	}
 	total := 0
 	for _, sc := range scenarios {
@@ -338,6 +345,8 @@ func TestEdge(t *testing.T) {
 			{"facts-summary.png", "shot-facts-summary", a.main},
 			{"facts-down.png", "shot-facts-down", a.main},
 			{"pipeline.png", "shot-pipeline", a.main},
+			{"hub-servers.png", "shot-hub-servers", a.main},
+			{"hub-flow.png", "shot-hub", a.main},
 		} {
 			edgeRun(t, edge, fmt.Sprintf("%s/?scenario=%s#c=%s", shot.URL, s.scenario, s.conv), "1400,900",
 				"--screenshot="+filepath.Join(abs, s.file))
@@ -729,4 +738,257 @@ func (p *edgePipe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		reply(404, map[string]any{"error": "нет такого раздела"})
 	}
+}
+
+// ===== Окно «MCP-серверы» (v20) =====
+
+// edgeHub — REST реестра и флоу за /api/hub/: настоящий hubapi.API, но с
+// подставным реестром (edgeRouter: три сервера, до «Подключить все» — idle)
+// и подставным прогоном. Прогон, как edgePipe, двигается не по часам, а по
+// опросам: каждый GET /api/hub/flows/{id} завершает идущий вызов и начинает
+// следующий, так что сценарий видит вызов «идёт» при любой скорости
+// виртуального времени headless Edge. Флоу — «Паспорт вида в блокнот»:
+// 13 вызовов трёх серверов, facts_get отвечает ошибкой (законной), в
+// итоге одна проверка — предупреждение. В аргументах, ответе модели,
+// превью и причине скрытого маршрута — разметка: окно обязано показать её
+// буквами.
+type edgeHub struct {
+	api    *hubapi.API
+	h      http.Handler
+	router *edgeRouter
+	ticks  chan chan struct{}
+
+	mu        sync.Mutex
+	active    bool // прогон ждёт опросов
+	finishing bool // последний вызов завершён, прогон возвращает трассу
+}
+
+const edgeHubXSS = `<img src=x onerror=window.__xss=31>` // без кавычек: встаёт и в JSON аргументов
+
+func newEdgeHub() *edgeHub {
+	e := &edgeHub{router: &edgeRouter{calls: map[string]int{}}, ticks: make(chan chan struct{})}
+	e.api = &hubapi.API{Router: e.router, Run: e.run, Presets: []flow.Preset{
+		{ID: "passport", Title: "Паспорт вида в блокнот", Species: "манул"},
+		{ID: "brief", Title: "Короткая справка", Species: "рысь"},
+	}}
+	mux := http.NewServeMux()
+	for _, x := range e.api.Extension() {
+		mux.Handle(x.Prefix, x.Handler)
+	}
+	e.h = mux
+	return e
+}
+
+// edgeRouter — подставной реестр: sources (stdio), daemon (HTTP), notes
+// (stdio). Счётчики вызовов растут по ходу флоу.
+type edgeRouter struct {
+	mu        sync.Mutex
+	connected bool
+	calls     map[string]int
+}
+
+func (r *edgeRouter) Servers(context.Context) []hub.ServerView {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list := []hub.ServerView{
+		{Name: "sources", Title: "Источники: Википедия и GBIF", Color: "#2f6b4f", Transport: hub.TransportStdio,
+			Addr: "animals-mcp -data C:/AnimalGuide/data", Reported: "animals-sources", Version: "20.0.0", PID: 4312, Tools: 6},
+		{Name: "daemon", Title: "Демон: MDD и «Интересные факты»", Color: "#2c5a85", Transport: hub.TransportHTTP,
+			Addr: "http://127.0.0.1:8766/mcp", Reported: "animals-daemon", Version: "20.0.0", PID: 5120, Tools: 3, Hidden: 5},
+		{Name: "notes", Title: "Блокнот натуралиста", Color: "#a5701a", Transport: hub.TransportStdio,
+			Addr: "animals-mcp -role notes", Reported: "animals-notes", Version: "20.0.0", PID: 4388, Tools: 3, Hidden: 1},
+	}
+	for i := range list {
+		if !r.connected {
+			list[i].Status, list[i].Reported, list[i].Version, list[i].PID = hub.StatusIdle, "", "", 0
+			continue
+		}
+		list[i].Status = hub.StatusOK
+		list[i].Calls = r.calls[list[i].Name]
+	}
+	return list
+}
+
+func (r *edgeRouter) Connect(context.Context) error {
+	time.Sleep(300 * time.Millisecond)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.connected = true
+	return nil
+}
+
+func (r *edgeRouter) Routes(context.Context) ([]hub.Route, error) {
+	return []hub.Route{
+		{Tool: "search_wikipedia", Server: "sources"},
+		{Tool: "read_wikipedia", Server: "sources"},
+		{Tool: "match_taxon", Server: "sources"},
+		{Tool: "taxon_tree", Server: "sources"},
+		{Tool: "vernacular_names", Server: "sources"},
+		{Tool: "gbif_occurrences", Server: "sources"},
+		{Tool: "mdd_search", Server: "daemon"},
+		{Tool: "mdd_get", Server: "daemon"},
+		{Tool: "facts_get", Server: "daemon"},
+		{Tool: "search_wikipedia", Server: "daemon", Hidden: true, Reason: "дубль → sources"},
+		{Tool: "read_wikipedia", Server: "daemon", Hidden: true, Reason: "дубль → sources"},
+		{Tool: "run_now", Server: "daemon", Hidden: true, Reason: "не разрешён " + edgeHubXSS},
+		{Tool: "summarize", Server: "daemon", Hidden: true, Reason: "не разрешён"},
+		{Tool: "server_info", Server: "daemon", Hidden: true, Reason: "служебный"},
+		{Tool: "nb_open", Server: "notes"},
+		{Tool: "nb_add", Server: "notes"},
+		{Tool: "nb_close", Server: "notes"},
+		{Tool: "server_info", Server: "notes", Hidden: true, Reason: "служебный"},
+	}, nil
+}
+
+func (r *edgeRouter) Tools(context.Context) ([]hub.Bound, error)     { return nil, nil }
+func (r *edgeRouter) Snapshot(context.Context) (hub.Snapshot, error) { return hub.Snapshot{}, nil }
+
+// edgeHubCalls — 13 вызовов флоу: завершённые (с ответами и From).
+func edgeHubCalls(species string) []flow.Call {
+	type c struct {
+		turn         int
+		server, tool string
+		args, result string
+		summary, err string
+		from         []int
+	}
+	nb := `"notebook_id":"nb-7f3a"`
+	list := []c{
+		{1, "sources", "search_wikipedia", `{"query":"` + species + `"}`, `{"results":[{"title":"Манул"}]}`, "Манул — 5 статей", "", nil},
+		{2, "sources", "read_wikipedia", `{"title":"Манул"}`, `{"title":"Манул","extract":"…"}`, "статья «Манул», 18 КБ", "", []int{1}},
+		{2, "daemon", "mdd_search", `{"query":"Otocolobus manul"}`, `{"results":[{"id":1006010}]}`, "1 вид: Otocolobus manul", "", nil},
+		{3, "daemon", "mdd_get", `{"id":1006010}`, `{"id":1006010,"sci_name":"Otocolobus manul"}`, "Otocolobus manul, Felidae", "", []int{3}},
+		{4, "sources", "match_taxon", `{"name":"Otocolobus manul"}`, `{"usageKey":2435022}`, "GBIF 2435022", "", []int{4}},
+		{5, "sources", "taxon_tree", `{"key":2435022}`, `{"tree":[]}`, "Animalia → … → Otocolobus", "", []int{5}},
+		{5, "sources", "vernacular_names", `{"key":2435022}`, `{"names":["Pallas's cat"]}`, "12 названий", "", []int{5}},
+		{6, "daemon", "facts_get", `{"species_id":1006010}`, "", "", "выпуска о виде 1006010 нет", []int{4}},
+		{7, "notes", "nb_open", `{"title":"Паспорт: ` + species + `"}`, `{` + nb + `}`, "блокнот nb-7f3a", "", nil},
+		{8, "notes", "nb_add", `{` + nb + `,"section":"таксономия","text":"Felidae ` + edgeHubXSS + `","cites":["mdd_get","taxon_tree"]}`, `{"ok":true}`, "раздел 1", "", []int{9, 4}},
+		{8, "notes", "nb_add", `{` + nb + `,"section":"названия","text":"Pallas's cat","cites":["vernacular_names"]}`, `{"ok":true}`, "раздел 2", "", []int{9}},
+		{9, "notes", "nb_add", `{` + nb + `,"section":"описание","text":"Степи Центральной Азии","cites":["read_wikipedia"]}`, `{"ok":true}`, "раздел 3", "", []int{9}},
+		{10, "notes", "nb_close", `{` + nb + `}`, `{"path":"notes/otocolobus-manul.md"}`, "notes/otocolobus-manul.md", "", []int{9}},
+	}
+	out := make([]flow.Call, len(list))
+	for i, x := range list {
+		out[i] = flow.Call{N: i + 1, Turn: x.turn, CallID: fmt.Sprintf("call_%d", i+1), Server: x.server, Tool: x.tool,
+			Args: json.RawMessage(x.args), Summary: x.summary, Error: x.err, OK: x.err == "",
+			Took: time.Duration(40+i*37) * time.Millisecond, Bytes: 200 + i*50, From: x.from}
+		if x.result != "" {
+			out[i].Result = json.RawMessage(x.result)
+		}
+	}
+	return out
+}
+
+// wait — ждать опроса окна; ack закрывается, когда шаг сделан.
+func (e *edgeHub) wait(ctx context.Context) (chan struct{}, error) {
+	select {
+	case ack := <-e.ticks:
+		return ack, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (e *edgeHub) run(ctx context.Context, p flow.Preset, species string, onCall func(flow.Call)) (flow.Trace, error) {
+	e.mu.Lock()
+	e.active, e.finishing = true, false
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		e.active = false
+		e.mu.Unlock()
+	}()
+	started := time.Now()
+	calls := edgeHubCalls(species)
+	// start — вызов в начале: без ответа, ошибки и времени.
+	start := func(c flow.Call) flow.Call {
+		c.OK, c.Result, c.Error, c.Summary, c.Took, c.From = false, nil, "", "", 0, nil
+		return c
+	}
+	for i := 0; i <= len(calls); i++ {
+		ack, err := e.wait(ctx)
+		if err != nil {
+			return flow.Trace{}, err
+		}
+		if i > 0 {
+			done := calls[i-1]
+			done.From = nil // From заполняет Verify — в итоге
+			onCall(done)
+			e.router.mu.Lock()
+			e.router.calls[done.Server]++
+			e.router.mu.Unlock()
+		}
+		if i < len(calls) {
+			onCall(start(calls[i]))
+		} else {
+			e.mu.Lock()
+			e.finishing = true
+			e.mu.Unlock()
+		}
+		close(ack)
+	}
+	served := func(server string) map[string]int {
+		m := map[string]int{}
+		for _, c := range calls {
+			if c.Server == server {
+				m[c.Tool]++
+			}
+		}
+		return m
+	}
+	checks := []flow.Check{
+		{Name: "выбор: search_wikipedia, read_wikipedia", Level: flow.LevelOK, Note: "вызовы №1, №2"},
+		{Name: "выбор: mdd_search → mdd_get", Level: flow.LevelOK, Note: "вызовы №3, №4"},
+		{Name: "выбор: facts_get", Level: flow.LevelWarn, Note: "ответ — ошибка «выпуска нет»; для этого шага она допустима"},
+		{Name: "маршрут", Level: flow.LevelOK, Note: "13 из 13 вызовов ушли на сервер своего маршрута"},
+		{Name: "данные: mdd_search → mdd_get.id", Level: flow.LevelOK, Note: "1006010 из ответа №3 в аргументах №4"},
+		{Name: "данные: nb_open → nb_add.notebook_id", Level: flow.LevelOK, Note: "nb-7f3a из ответа №9 в №10–13"},
+		{Name: "порядок: nb_add → nb_close", Level: flow.LevelOK},
+		{Name: "запрещённые инструменты", Level: flow.LevelOK, Note: "run_now, summarize не вызывались"},
+		{Name: "серверы подтвердили", Level: flow.LevelOK, Note: "счётчики server_info совпали с трассой"},
+		{Name: "ссылки cites", Level: flow.LevelOK, Note: "все источники вызваны раньше, серверы sources и daemon"},
+	}
+	var deltas []flow.ServerDelta
+	for _, s := range []struct {
+		name string
+		pid  int
+	}{{"sources", 4312}, {"daemon", 5120}, {"notes", 4388}} {
+		deltas = append(deltas, flow.ServerDelta{Server: s.name, Served: served(s.name), Traced: served(s.name), PID: s.pid})
+	}
+	return flow.Trace{Preset: p.ID, Species: species, Task: p.Title, Calls: calls,
+		Verdict: flow.Verdict{OK: true, Checks: checks}, Servers: deltas,
+		Answer:  "Паспорт манула записан в блокнот: таксономия, названия, описание. <script>window.__xss=32</script>",
+		File:    "notes/otocolobus-manul.md",
+		Preview: "# Паспорт: манул <script>window.__xss=33</script>\n\n## Таксономия\nFelidae " + edgeHubXSS + "\n\n## Названия\nPallas's cat",
+		CostUSD: 0.0123, Turns: 10, Started: started, Took: time.Since(started), OK: true}, nil
+}
+
+func (e *edgeHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, hubapi.Prefix+"flows/") {
+		e.mu.Lock()
+		active := e.active
+		e.mu.Unlock()
+		if active {
+			ack := make(chan struct{})
+			select {
+			case e.ticks <- ack:
+				<-ack
+			case <-time.After(300 * time.Millisecond):
+			}
+			// Последний шаг: дождаться, пока API примет трассу.
+			e.mu.Lock()
+			fin := e.finishing
+			e.mu.Unlock()
+			for end := time.Now().Add(2 * time.Second); fin && time.Now().Before(end); {
+				rec := httptest.NewRecorder()
+				e.h.ServeHTTP(rec, r.Clone(r.Context()))
+				if !strings.Contains(rec.Body.String(), `"state":"running"`) {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+	}
+	e.h.ServeHTTP(w, r)
 }
