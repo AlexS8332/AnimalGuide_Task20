@@ -169,6 +169,10 @@ func daemonState(ctx context.Context, d *daemon.Daemon) any {
 	return out
 }
 
+// DaemonName — имя демона в initialize и server_info: реестр серверов
+// отличает по нему демон от stdio-сервера источников.
+const DaemonName = "animals-daemon"
+
 // daemonServer — MCP-сервер демона: источники (как по stdio), справочник
 // MDD, инструменты демона и конвейер search → summarize → save_to_file.
 // Возвращает и число инструментов — для журнала.
@@ -180,5 +184,6 @@ func daemonServer(d *daemon.Daemon, src sources, logger *slog.Logger) (*mcp.Serv
 	ts = append(ts, daemonTools(d)...)
 	ts = append(ts, pipelineTools(d)...)
 	return mcp.NewServer(ts, mcp.ServerOptions{WikiBase: src.wiki, GBIFBase: src.gbif, Fetcher: fetcher, Logger: logger,
+		Name: DaemonName, Title: "Демон «Интересных фактов»",
 		State: func(ctx context.Context) any { return daemonState(ctx, d) }}), len(ts)
 }

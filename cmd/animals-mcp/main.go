@@ -58,6 +58,7 @@ func main() {
 	mddURL := flag.String("mdd-url", os.Getenv("MDD_URL"), "адрес архива MDD; пусто — репозиторий MDD на GitHub (переменная MDD_URL)")
 	mddSync := flag.Bool("mdd-sync", true, "скачать справочник MDD в фоне, если база пуста")
 	mddUpdate := flag.Bool("mdd-update", false, "загрузить или обновить справочник MDD и выйти")
+	role := flag.String("role", "sources", "роль stdio-сервера: sources — источники и MDD, notes — блокнот натуралиста (nb_open, nb_add, nb_close)")
 	var dc daemonFlags
 	flag.BoolVar(&dc.on, "daemon", false, "режим 24/7: выпуск фактов по расписанию, проверка релиза MDD, суточная сводка")
 	flag.StringVar(&dc.run, "run", "", "выполнить одно задание демона (issue, summary, mdd) и выйти")
@@ -79,6 +80,15 @@ func main() {
 		level = slog.LevelInfo
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
+	switch *role {
+	case "sources":
+	case "notes":
+		os.Exit(runNotes(*dataDir, logger))
+	default:
+		fmt.Fprintf(os.Stderr, "неизвестная роль %q: sources или notes\n", *role)
+		os.Exit(2)
+	}
 
 	if dc.on || dc.run != "" || dc.http != "" {
 		os.Exit(runDaemon(dc, *dataDir, *mddURL, sources{wiki: *wikiBase, gbif: *gbifBase}, logger))

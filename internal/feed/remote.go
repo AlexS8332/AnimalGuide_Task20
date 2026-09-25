@@ -15,6 +15,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/mcp"
+	"github.com/AlexS8332/AnimalGuide_Task20/internal/notes"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/pipeline"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/tools"
 )
@@ -50,7 +51,10 @@ const (
 // и повтор стал бы вторым платным запуском. summarize конвейера платный так
 // же, а save_to_file при повторе записал бы второй файл.
 var writeTools = map[string]bool{toolRunNow: true, toolSummaryBuild: true,
-	pipeline.ToolSummarize: true, pipeline.ToolSaveFile: true}
+	pipeline.ToolSummarize: true, pipeline.ToolSaveFile: true,
+	// Блокнот: повтор nb_add добавил бы раздел дважды, nb_open открыл бы
+	// второй блокнот, nb_close после записи отказал бы «уже закрыт».
+	notes.ToolOpen: true, notes.ToolAdd: true, notes.ToolClose: true}
 
 const (
 	// connectTimeout — предел на initialize и tools/list: демон локальный,
@@ -450,4 +454,38 @@ func (r *Remote) version() string {
 		return ""
 	}
 	return " (версия " + r.ver + ")"
+}
+
+// NewRemoteDial — клиент к любому MCP-серверу с готовым способом
+// подключения: stdio-процесс (mcp.Launcher.Dial) или HTTP (mcp.HTTPDialer).
+// label — как показывать сервер (имя из реестра серверов); вызовы, ошибки и
+// неповторяемые инструменты — как у клиента демона. Status для такого
+// клиента не годится: он спрашивает расписание демона.
+func NewRemoteDial(label string, d mcp.Dialer, log *slog.Logger) *Remote {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Remote{server: label, log: log, dial: d, now: time.Now}
+}
+
+// List — инструменты сервера, как он их отдал в tools/list (подключается,
+// если соединения ещё нет).
+func (r *Remote) List(ctx context.Context) ([]*sdk.Tool, string, error) {
+	if _, err := r.session(ctx); err != nil {
+		return nil, "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*sdk.Tool(nil), r.list...), r.ver, nil
+}
+
+// Init — ответ initialize текущего соединения: имя, название и версия
+// сервера и его инструкция. nil — соединения нет.
+func (r *Remote) Init() *sdk.InitializeResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sess == nil {
+		return nil
+	}
+	return r.sess.InitializeResult()
 }
