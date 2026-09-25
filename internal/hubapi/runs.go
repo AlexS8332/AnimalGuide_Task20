@@ -2,6 +2,7 @@ package hubapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -198,6 +199,7 @@ func (a *API) call(id string, c flow.Call) {
 // putCall — вызов встаёт на место своего номера; новый номер — начатый
 // вызов (Pending как передан), известный — завершённый.
 func putCall(calls *[]CallView, c CallView) {
+	c.Args, c.Result = validJSON(c.Args), validJSON(c.Result)
 	for i := range *calls {
 		if c.N > 0 && (*calls)[i].N == c.N {
 			c.Pending = false
@@ -233,8 +235,10 @@ func (a *API) finish(id string, tr flow.Trace, err error) {
 	}
 	// Вызовы итога заменяют свои номера; начатые, но не попавшие в итог
 	// (прогон оборвался на них), остаются.
-	for _, c := range tr.Calls {
-		putCall(&r.calls, CallView{Call: c})
+	tr.Calls = append([]flow.Call(nil), tr.Calls...)
+	for i, c := range tr.Calls {
+		tr.Calls[i].Args, tr.Calls[i].Result = validJSON(c.Args), validJSON(c.Result)
+		putCall(&r.calls, CallView{Call: tr.Calls[i]})
 	}
 	r.state = StateDone
 	if err != nil {
@@ -294,6 +298,17 @@ func (a *API) list() []FlowRow {
 		out = append(out, row)
 	}
 	return out
+}
+
+// validJSON — аргументы модели бывают битым JSON (обрезанный ответ,
+// лишняя кавычка). json.RawMessage с таким текстом ломает кодирование всего
+// ответа — окно получило бы пустое тело. Битый текст уходит строкой JSON.
+func validJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || json.Valid(raw) {
+		return raw
+	}
+	b, _ := json.Marshal(string(raw))
+	return b
 }
 
 func firstNonEmpty(s ...string) string {

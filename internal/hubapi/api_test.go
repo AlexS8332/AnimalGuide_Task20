@@ -394,3 +394,26 @@ func TestKeepRuns(t *testing.T) {
 		t.Fatalf("старый прогон не забыт: %d", code)
 	}
 }
+
+// Битые аргументы модели не должны ломать ответ целиком: они уходят
+// строкой JSON.
+func TestBrokenArgs(t *testing.T) {
+	a := &API{Router: &fakeRouter{}, Presets: testPresets}
+	a.Run = func(ctx context.Context, p flow.Preset, species string, onCall func(flow.Call)) (flow.Trace, error) {
+		c := flow.Call{N: 1, Tool: "nb_add", Args: json.RawMessage(`{"text":"<img onerror="x">"}`)}
+		onCall(c)
+		c.OK, c.Result = true, json.RawMessage(`{oops`)
+		onCall(c)
+		return flow.Trace{Calls: []flow.Call{c}, OK: true}, nil
+	}
+	h := newAPI(t, a)
+	do(t, h, "POST", "/api/hub/flows", `{}`)
+	v := poll(t, h, "f1", func(v FlowView) bool { return v.State == StateDone })
+	var args string
+	if err := json.Unmarshal(v.Calls[0].Args, &args); err != nil || !strings.Contains(args, `onerror="x"`) {
+		t.Fatalf("аргументы: %s (%v)", v.Calls[0].Args, err)
+	}
+	if string(v.Trace.Calls[0].Result) != `"{oops"` {
+		t.Fatalf("ответ в трассе: %s", v.Trace.Calls[0].Result)
+	}
+}
