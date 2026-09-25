@@ -350,3 +350,117 @@ tr.pipe-run-row.current td { background: var(--green-soft); }
   .pipe-arrow { flex-basis: auto; flex-direction: row; padding: 4px 0; }
   .pipe-arrow-line { transform: rotate(90deg); }
 }
+
+/* ===== Окно «MCP-серверы» (v20) =====
+   Реестр серверов, маршруты «инструмент → сервер» и длинный флоу. У
+   каждого сервера свой цвет (--hub-c, из конфигурации): метка в таблицах,
+   полоса слева у строки вызова — по ней видно, как флоу ходит между
+   серверами. Скрытый маршрут приглушён, идущий вызов — янтарный с бегущей
+   полосой, как шаг конвейера. Тёмной темы у справочника нет — только
+   светлая, на тех же переменных. */
+.hub { display: flex; flex-direction: column; gap: 0; --hub-c: #8a8478; }
+/* таблице вызовов тесно в 960 px: окно с реестром шире остальных */
+.window:has(#hub-root) { width: min(1240px, 96vw); }
+.hub-tabs { margin: -12px -14px 10px; }
+.hub-body { display: flex; flex-direction: column; gap: 10px; }
+.hub-h { margin: 12px 0 4px; font-size: 13px; }
+.hub-button { display: inline-flex; align-items: center; gap: 3px; }
+.hub-button .hub-pdot:last-of-type { margin-right: 3px; }
+.hub-pdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--hub-c, #c9c1af); opacity: .35; }
+.hub-pdot.ok { opacity: 1; }
+.hub-pdot.bad { opacity: 1; background: var(--brick); }
+.hub-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.hub-sum { font-size: 13px; color: var(--muted); }
+.hub-sum b { color: var(--ink); }
+.hub-why { margin-top: -4px; }
+.hub-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* метка сервера */
+.hub-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 1px 8px 1px 6px;
+  border-radius: 999px; border: 1px solid var(--hub-c); color: var(--hub-c); background: #fff; white-space: nowrap; }
+.hub-tag.none { border-style: dashed; font-weight: 400; }
+.hub-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--hub-c); display: inline-block; }
+.hub-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.hub-legend-n { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* серверы */
+table.hub-servers td { vertical-align: middle; }
+tr.hub-server td:first-child { border-left: 4px solid var(--hub-c); padding-left: 8px; }
+.hub-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--hub-c); margin-right: 6px; }
+.hub-addr { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.hub-transport { background: var(--blue-soft); border-color: #c3d4e6; }
+.hub-status-reason { font-size: 12px; color: var(--brick); margin-top: 3px; overflow-wrap: anywhere; }
+.hub-status-hint { margin-top: 3px; font-size: 12px; background: var(--amber-soft); border: 1px solid #e8d2a6; border-radius: 6px; padding: 3px 6px; overflow-wrap: anywhere; }
+tr.hub-server.st-idle td { color: var(--muted); }
+
+/* маршруты */
+table.hub-routes code { font-family: var(--mono); font-size: 12px; }
+tr.hub-route td:first-child { border-left: 3px solid var(--hub-c); }
+tr.hub-route.hidden td { opacity: .55; background: #faf8f3; }
+tr.hub-route.hidden td:first-child { border-left-style: dashed; }
+tr.hub-route.hidden code { text-decoration: line-through; text-decoration-color: rgba(0, 0, 0, .35); }
+.hub-given { color: var(--green); font-size: 12px; }
+.hub-reason { color: var(--muted); font-size: 12px; font-style: italic; }
+
+/* форма флоу */
+.hub-flow { display: flex; flex-direction: column; gap: 10px; }
+.hub-form { display: flex; flex-direction: column; gap: 6px; background: #faf6ec; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.hub-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.hub-row select { padding: 4px 6px; border-radius: 7px; border: 1px solid var(--line); background: #fff; max-width: 320px; }
+.hub-row input[type="text"] { flex: 1; min-width: 160px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+.hub-view { display: flex; flex-direction: column; gap: 8px; }
+.hub-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+.hub-total { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+/* вызовы */
+table.hub-calls { font-size: 12.5px; }
+table.hub-calls td { vertical-align: middle; }
+tr.hub-call td:first-child { border-left: 4px solid var(--hub-c); }
+.hub-n { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; width: 28px; }
+.hub-turn { color: var(--muted); font-variant-numeric: tabular-nums; width: 28px; }
+.hub-tool { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.hub-summary { margin-top: 1px; overflow-wrap: anywhere; }
+.hub-args { font-family: var(--mono); font-size: 11px; color: var(--muted); max-width: 300px; overflow-wrap: anywhere; }
+.hub-mark { width: 22px; text-align: center; font-weight: 700; }
+tr.hub-call.st-ok .hub-mark { color: var(--green); }
+tr.hub-call.st-fail .hub-mark, .hub-call-error { color: var(--brick); }
+.hub-call-error { font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+tr.hub-call.st-fail td { background: #fdf6f4; }
+tr.hub-call.st-running td { background: #fff4dc; }
+tr.hub-call.st-running td:nth-child(2) { position: relative; overflow: hidden; }
+tr.hub-call.st-running td:nth-child(2)::after { content: ""; position: absolute; left: -40%; bottom: 0; height: 2px; width: 40%; background: var(--amber); animation: pipe-run 1.1s linear infinite; }
+.hub-from { display: inline-block; font-size: 11px; color: var(--blue); background: var(--blue-soft); border-radius: 6px; padding: 0 5px; margin: 1px 0; white-space: nowrap; }
+
+/* итог */
+.hub-result { border-radius: 8px; padding: 8px 12px; border: 1px solid var(--line); font-size: 13px; background: #fff; }
+.hub-result.ok { border-color: #b9d6c4; box-shadow: inset 4px 0 0 var(--green); }
+.hub-result.bad { border-color: #e6bdb2; box-shadow: inset 4px 0 0 var(--brick); }
+.hub-result-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+.hub-result.ok .hub-result-head > b { color: var(--green); }
+.hub-result.bad .hub-result-head > b { color: var(--brick); }
+.hub-result-meta { margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hub-result-meta b { color: var(--ink); }
+.hub-result-error { margin-top: 6px; color: var(--brick); overflow-wrap: anywhere; }
+.hub-checks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 3px 12px; }
+.hub-check { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 2px 0; border-bottom: 1px dotted var(--line); }
+.hub-check-mark { font-weight: 700; width: 14px; text-align: center; }
+.hub-check.ok .hub-check-mark { color: var(--green); }
+.hub-check.bad .hub-check-mark, .hub-check.bad .hub-check-name { color: var(--brick); }
+.hub-check.warn .hub-check-mark { color: var(--amber); }
+.hub-check.warn { background: var(--amber-soft); border-radius: 4px; }
+.hub-check-note { flex-basis: 100%; padding-left: 20px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+table.hub-deltas td { vertical-align: middle; }
+.hub-dt { display: inline-block; margin: 1px 8px 1px 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.hub-dt code { font-family: var(--mono); font-size: 11px; }
+.hub-dt.ok { color: var(--green); }
+.hub-dt.bad { color: var(--brick); font-weight: 600; }
+.hub-answer { white-space: pre-wrap; overflow-wrap: anywhere; background: #faf7ef; border: 1px solid #eee5d3; border-radius: 6px; padding: 6px 9px; }
+.hub-file-row code { font-family: var(--mono); font-size: 12px; }
+.window-body pre.hub-preview { max-height: 260px; overflow: auto; background: #fff; margin: 6px 0 0; }
+tr.hub-run-row { cursor: pointer; }
+tr.hub-run-row:hover td { background: #faf6ec; }
+tr.hub-run-row.current td { background: var(--green-soft); }
+@media (max-width: 760px) {
+  .hub-args { max-width: 140px; }
+  .hub-total, .hub-result-meta { margin-left: 0; }
+}
