@@ -327,8 +327,11 @@ func (v *verifier) servers() {
 	v.add(CheckServers, LevelOK, note)
 }
 
-// cites — ссылки на источники: каждый названный инструмент успешно вызван
-// раньше раздела, а среди их серверов есть все CiteServers.
+// cites — ссылки на источники: каждый названный инструмент засчитанно
+// вызван раньше раздела, а среди их серверов есть все CiteServers.
+// Засчитанный — как у шагов (counted): успешный, а у шага с AllowError и
+// ответ-ошибка. «Выпуска о виде ещё не было» от facts_get — тоже сведение
+// из источника, и сослаться на него честно; вживую модель так и делает.
 func (v *verifier) cites() {
 	if v.spec.CiteTool == "" {
 		return
@@ -350,12 +353,12 @@ func (v *verifier) cites() {
 		for _, name := range names {
 			server := ""
 			for _, p := range v.calls[:i] {
-				if p.Tool == name && p.OK && p.Server != "" {
+				if p.Tool == name && p.Server != "" && v.citable(p) {
 					server = p.Server
 				}
 			}
 			if server == "" {
-				bad = append(bad, fmt.Sprintf("№%d %s ссылается на %s — успешного вызова раньше не было", c.N, c.Tool, name))
+				bad = append(bad, fmt.Sprintf("№%d %s ссылается на %s — засчитанного вызова раньше не было", c.N, c.Tool, name))
 				continue
 			}
 			covered[server] = true
@@ -810,4 +813,18 @@ func sum(m map[string]int) int {
 		n += v
 	}
 	return n
+}
+
+// citable — можно ли сослаться на вызов: он засчитан хотя бы одному шагу
+// с тем же инструментом, а у инструментов вне спецификации — успешен.
+func (v *verifier) citable(c Call) bool {
+	if c.OK {
+		return true
+	}
+	for _, st := range v.spec.Steps {
+		if st.Tool == c.Tool && counted(c, st) {
+			return true
+		}
+	}
+	return false
 }

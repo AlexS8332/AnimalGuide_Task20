@@ -210,6 +210,33 @@ func TestVerifyDetails(t *testing.T) {
 		t.Errorf("facts_get ошибкой:\n%s", dump(v))
 	}
 
+	// Ссылка на facts_get, ответивший «выпуска не было»: ответ засчитан
+	// шагу (AllowError) — это сведение, сослаться можно. Так делает живая
+	// модель в разделе «Интересные факты». А ссылка на упавший инструмент,
+	// которому ошибка не разрешена, — провал.
+	for k := range cs {
+		if cs[k].Tool == "nb_add" {
+			cs[k].Args = json.RawMessage(`{"notebook_id":` + string(mustField(cs[k].Args, "notebook_id")) +
+				`,"heading":"x","text":"y","cites":["read_wikipedia","facts_get"]}`)
+		}
+	}
+	v = flow.Verify(p.SpecFor(""), cs, routes, evidenceFor(cs))
+	if level(v, flow.CheckCites) != flow.LevelOK {
+		t.Errorf("ссылка на facts_get с разрешённой ошибкой:\n%s", dump(v))
+	}
+	j := index(cs, "match_taxon")
+	cs[j].OK, cs[j].Result, cs[j].Error = false, nil, "GBIF не ответил"
+	for k := range cs {
+		if cs[k].Tool == "nb_add" {
+			cs[k].Args = json.RawMessage(`{"notebook_id":` + string(mustField(cs[k].Args, "notebook_id")) +
+				`,"heading":"x","text":"y","cites":["match_taxon","mdd_get"]}`)
+		}
+	}
+	v = flow.Verify(p.SpecFor(""), cs, routes, evidenceFor(cs))
+	if level(v, flow.CheckCites) != flow.LevelFail {
+		t.Errorf("ссылка на упавший match_taxon:\n%s", dump(v))
+	}
+
 	// Демон обслужил и других клиентов — предупреждение, не провал.
 	cs = clone(good.tr.Calls)
 	ev := evidenceFor(cs)
