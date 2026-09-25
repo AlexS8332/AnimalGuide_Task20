@@ -16,7 +16,6 @@
 package flow
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"time"
@@ -201,24 +200,3 @@ type Config struct {
 
 // ErrNoPreset — неизвестная заготовка.
 var ErrNoPreset = errors.New("flow: нет такой заготовки")
-
-var errTODO = errors.New("flow: не реализовано")
-
-// Presets — заготовки флоу; первая — по умолчанию («passport»).
-func Presets() []Preset { return nil }
-
-// Find — заготовка по ID; пустой ID — первая.
-func Find(id string) (Preset, error) { return Preset{}, errTODO }
-
-// Run — прогон заготовки p о виде species (пусто — p.Species): снимок
-// счётчиков, модель с инструментами реестра, снимок, Verify. onCall
-// получает каждый вызов дважды: при старте (OK=false, без Result) и по
-// завершении. Ошибка — только если прогон не состоялся (нет модели, реестр
-// пуст); проваленные проверки — Trace.OK=false без ошибки.
-func Run(ctx context.Context, cfg Config, p Preset, species string, onCall func(Call)) (Trace, error) {
-	return Trace{}, errTODO
-}
-
-// Verify сверяет вызовы со спецификацией; routes — маршруты реестра на
-// момент прогона (сервер каждого инструмента), ev — счётчики серверов.
-func Verify(s Spec, calls []Call, routes []hub.Route, ev *Evidence) Verdict { return Verdict{} }
