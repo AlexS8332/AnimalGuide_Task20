@@ -9,8 +9,6 @@
 // которой проверяется порядок вызовов в длинном флоу.
 package notes
 
-import "github.com/AlexS8332/AnimalGuide_Task20/internal/tools"
-
 // Имя сервера в initialize и server_info и имена инструментов.
 const (
 	ServerName = "animals-notes"
@@ -67,12 +65,4 @@ type CloseResult struct {
 	Sections   int      `json:"sections"`
 	Cites      []string `json:"cites"`
 	Preview    string   `json:"preview"` // начало текста файла
-}
-
-// Tools — инструменты блокнота над каталогом dir (<data>/notes). Каталог
-// создаётся при первом nb_close. Состояние открытых блокнотов — в памяти
-// процесса.
-func Tools(dir string) []tools.Tool {
-	_ = dir
-	panic("notes.Tools: не реализовано")
 }
