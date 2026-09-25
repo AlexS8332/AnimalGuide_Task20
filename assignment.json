@@ -6,7 +6,7 @@
   "status": "planned",
   "created": "2026-09-25",
   "updated": "2026-09-25",
-  "repo": "",
+  "repo": "https://github.com/AlexS8332/AnimalGuide_Task20",
   "env": [
     "DEEPSEEK_API_KEY"
   ],
