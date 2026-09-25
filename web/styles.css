@@ -442,13 +442,15 @@ tr.hub-call.st-running td:nth-child(2)::after { content: ""; position: absolute;
 .hub-result-meta b { color: var(--ink); }
 .hub-result-error { margin-top: 6px; color: var(--brick); overflow-wrap: anywhere; }
 .hub-checks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 3px 12px; }
-.hub-check { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 2px 0; border-bottom: 1px dotted var(--line); }
+.hub-check { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: baseline; align-content: start; gap: 2px 6px; padding: 2px 0; border-bottom: 1px dotted var(--line); }
+/* значок — своя колонка: длинное имя проверки переносится рядом с ним, а не под него */
+.hub-check-name { overflow-wrap: anywhere; }
 .hub-check-mark { font-weight: 700; width: 14px; text-align: center; }
 .hub-check.ok .hub-check-mark { color: var(--green); }
 .hub-check.bad .hub-check-mark, .hub-check.bad .hub-check-name { color: var(--brick); }
 .hub-check.warn .hub-check-mark { color: var(--amber); }
 .hub-check.warn { background: var(--amber-soft); border-radius: 4px; }
-.hub-check-note { flex-basis: 100%; padding-left: 20px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.hub-check-note { grid-column: 2; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 table.hub-deltas td { vertical-align: middle; }
 .hub-dt { display: inline-block; margin: 1px 8px 1px 0; font-size: 12px; font-variant-numeric: tabular-nums; }
 .hub-dt code { font-family: var(--mono); font-size: 11px; }
