@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -12,7 +13,10 @@ import (
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/extract"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/features"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/feed"
+	"github.com/AlexS8332/AnimalGuide_Task20/internal/flow"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/history"
+	"github.com/AlexS8332/AnimalGuide_Task20/internal/hub"
+	"github.com/AlexS8332/AnimalGuide_Task20/internal/hubapi"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/invariants"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/mcp"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/memory"
@@ -41,6 +45,10 @@ type app struct {
 	// Pipes — конвейер search → summarize → save_to_file у того же демона:
 	// REST запуска и следа; исполнитель-модель — та же модель, что у ходов.
 	Pipes *feed.Pipelines
+	// Hub — реестр MCP-серверов (sources, daemon, notes) и длинный флоу
+	// агента через них: REST окна «MCP-серверы». Серверы поднимаются по
+	// кнопке «Подключить все» или при первом флоу, не при старте.
+	Hub *hubapi.API
 	// Close гасит клиент и процесс MCP-сервера, если он запускался, и
 	// соединение с демоном фактов.
 	Close func()
@@ -99,8 +107,45 @@ func wire(o options, registry *features.Registry, defaults features.Set, runner 
 		// журнале заметка о демоне встаёт после событий памяти и профиля.
 		Hooks: []runs.Hook{compile, guide, people, trivia},
 	})
+	servers, err := openHub(o, dataDir, runner)
+	if err != nil {
+		return app{}, err
+	}
 	return app{Manager: manager, People: people, Compile: compile, Guide: guide, Local: local, Fetcher: fetcher,
 		Sources: sources, Feed: trivia,
 		Pipes: &feed.Pipelines{Remote: trivia.Remote, LLM: runner.LLM, Model: runner.Model},
-		Close: func() { client.Close(); launcher.Close(); trivia.Remote.Close() }}, nil
+		Hub:   servers.api,
+		Close: func() { client.Close(); launcher.Close(); trivia.Remote.Close(); servers.close() }}, nil
+}
+
+// hubParts — реестр серверов и его REST.
+type hubParts struct {
+	api   *hubapi.API
+	close func()
+}
+
+// openHub собирает реестр MCP-серверов по конфигурации (-mcp-config) и
+// раздел REST с длинным флоу. Подключения здесь нет — только разбор
+// конфигурации, поэтому сборка и стенд -report серверы не трогают.
+// stdio-серверам без своего command достаётся бинарник из -mcp-server —
+// тот же, что у механизма mcp.
+func openHub(o options, dataDir string, runner agent.Runner) (hubParts, error) {
+	cfg, err := hub.LoadConfig(o.hubConfig(), hub.Defaults{DataDir: dataDir, DaemonURL: o.facts()})
+	if err != nil {
+		return hubParts{}, err
+	}
+	for i := range cfg.Servers {
+		if s := &cfg.Servers[i]; s.Transport == hub.TransportStdio && s.Command == "" {
+			s.Command = o.mcpServer
+		}
+	}
+	h, err := hub.Open(cfg, nil)
+	if err != nil {
+		return hubParts{}, err
+	}
+	api := &hubapi.API{Router: h, Presets: flow.Presets(),
+		Run: func(ctx context.Context, p flow.Preset, species string, onCall func(flow.Call)) (flow.Trace, error) {
+			return flow.Run(ctx, flow.Config{Runner: runner, Router: h}, p, species, onCall)
+		}}
+	return hubParts{api: api, close: h.Close}, nil
 }

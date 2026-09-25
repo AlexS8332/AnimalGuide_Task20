@@ -62,6 +62,9 @@ type options struct {
 	// он флагом явно (тогда и пустая строка — «выключено»).
 	factsServer string
 	factsSet    bool
+	// mcpConfig — конфигурация реестра MCP-серверов (окно «MCP-серверы»,
+	// длинный флоу); пусто — MCP_CONFIG, иначе встроенная.
+	mcpConfig string
 }
 
 // facts — адрес демона фактов: флаг, иначе TRIVIA_SERVER, иначе адрес по
@@ -75,6 +78,15 @@ func (o options) facts() string {
 		return v
 	}
 	return feed.DefaultServer
+}
+
+// hubConfig — путь к конфигурации реестра серверов: флаг, иначе MCP_CONFIG,
+// иначе пусто (встроенная).
+func (o options) hubConfig() string {
+	if o.mcpConfig != "" {
+		return o.mcpConfig
+	}
+	return strings.TrimSpace(os.Getenv("MCP_CONFIG"))
 }
 
 func parseFlags() options {
@@ -92,6 +104,7 @@ func parseFlags() options {
 	flag.StringVar(&o.trials, "trials", "all", "какие испытания гонять с -report: «all», «1,6», «И-2»")
 	flag.StringVar(&o.reportOut, "report-out", filepath.Join("examples", "report.md"), "куда записать отчёт -report")
 	flag.StringVar(&o.factsServer, "facts-server", feed.DefaultServer, "адрес демона «Интересных фактов» (animals-mcp -http, механизм trivia и раздел интерфейса); по умолчанию TRIVIA_SERVER, иначе этот; пусто — выключить. Токен — MCP_TOKEN")
+	flag.StringVar(&o.mcpConfig, "mcp-config", "", "конфигурация реестра MCP-серверов (см. mcp-servers.example.json); пусто — MCP_CONFIG, иначе встроенная: sources, daemon, notes")
 	flag.Parse()
 	flag.Visit(func(f *flag.Flag) {
 		if f.Name == "facts-server" {
@@ -164,6 +177,7 @@ func main() {
 	exts = append(exts, a.Sources.Extension()...)
 	exts = append(exts, a.Feed.Extension()...)
 	exts = append(exts, a.Pipes.Extension()...)
+	exts = append(exts, a.Hub.Extension()...)
 	handler := server.New(manager, static, meta, exts...)
 
 	listener, err := net.Listen("tcp", o.addr)
