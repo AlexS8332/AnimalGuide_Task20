@@ -14,6 +14,9 @@ package hubapi
 
 import (
 	"context"
+	"net/http"
+	"sync"
+	"time"
 
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/flow"
 	"github.com/AlexS8332/AnimalGuide_Task20/internal/hub"
@@ -35,7 +38,15 @@ type API struct {
 	Presets []flow.Preset
 	// Why — почему реестр или флоу выключены (для 503 и окна).
 	Why string
+	// Timeout — предел одного прогона; 0 — flowTimeout.
+	Timeout time.Duration
+
+	mu   sync.Mutex
+	seq  int
+	runs []*flowRun // старые первыми
 }
 
 // Extension — раздел для server.New.
-func (a *API) Extension() []server.Extension { return nil }
+func (a *API) Extension() []server.Extension {
+	return []server.Extension{{Prefix: Prefix, Handler: http.HandlerFunc(a.handle)}}
+}
